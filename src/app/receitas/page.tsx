@@ -1,268 +1,615 @@
-"use client";
+'use client'
 
-import { useState } from "react";
-import { ArrowLeft, Plus, TrendingUp, Calendar, DollarSign } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { Plus, TrendingUp, DollarSign, Calendar, Tag, PieChart, TrendingDown, Wallet, Target, Users, Settings, LogOut, Bell, Moon, Sun, Trophy, Clock, Edit2, Trash2 } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { authService } from '@/lib/auth'
+import { supabase } from '@/lib/supabase'
+import { useTheme } from '@/components/custom/theme-provider'
+
+interface Transaction {
+  id: string
+  category: string
+  amount: number
+  description: string
+  date: string
+  type: string
+}
 
 export default function ReceitasPage() {
-  const router = useRouter();
-  const [showForm, setShowForm] = useState(false);
+  const router = useRouter()
+  const { theme, toggleTheme } = useTheme()
+  const [user, setUser] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
+  const [showMenu, setShowMenu] = useState(false)
+  const [isParceled, setIsParceled] = useState(false)
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [formData, setFormData] = useState({
+    category: '',
+    amount: '',
+    description: '',
+    date: new Date().toISOString().split('T')[0],
+    parcelNumber: '1'
+  })
+  const [installments, setInstallments] = useState<{ amount: string; date: string }[]>([])
 
-  const receitas = [
-    {
-      id: 1,
-      descricao: "Salário",
-      valor: 8500.0,
-      data: "2024-01-05",
-      categoria: "Salário",
-      recorrente: true,
-    },
-    {
-      id: 2,
-      descricao: "Freelance Design",
-      valor: 1200.0,
-      data: "2024-01-15",
-      categoria: "Freelance",
-      recorrente: false,
-    },
-    {
-      id: 3,
-      descricao: "Investimentos",
-      valor: 450.0,
-      data: "2024-01-20",
-      categoria: "Investimentos",
-      recorrente: true,
-    },
-  ];
+  useEffect(() => {
+    const currentUser = authService.getCurrentUser()
+    if (!currentUser) {
+      router.push('/')
+      return
+    }
+    setUser(currentUser)
+    loadTransactions(currentUser.id)
+  }, [router])
+
+  const loadTransactions = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('type', 'income')
+        .order('date', { ascending: false })
+
+      if (error) throw error
+      setTransactions(data || [])
+    } catch (error: any) {
+      console.error('Erro ao carregar transações:', error.message)
+    }
+  }
+
+  // Atualizar parcelas quando quantidade ou valor total mudar
+  useEffect(() => {
+    if (isParceled && formData.amount && formData.parcelNumber) {
+      const totalAmount = parseFloat(formData.amount)
+      const parcelNumber = parseInt(formData.parcelNumber)
+      if (parcelNumber > 0) {
+        const baseAmount = totalAmount / parcelNumber
+        const startDate = new Date(formData.date)
+        const newInstallments = []
+        for (let i = 0; i < parcelNumber; i++) {
+          const dueDate = new Date(startDate)
+          dueDate.setMonth(startDate.getMonth() + i)
+          newInstallments.push({
+            amount: baseAmount.toFixed(2),
+            date: dueDate.toISOString().split('T')[0]
+          })
+        }
+        setInstallments(newInstallments)
+      }
+    } else {
+      setInstallments([])
+    }
+  }, [formData.amount, formData.parcelNumber, formData.date, isParceled])
+
+  // Ajustar parcelas quando uma for alterada
+  const handleInstallmentChange = (index: number, field: 'amount' | 'date', value: string) => {
+    const newInstallments = [...installments]
+    newInstallments[index][field] = value
+
+    if (field === 'amount') {
+      // Recalcular as outras parcelas para manter o total
+      const totalAmount = parseFloat(formData.amount)
+      const changedAmount = parseFloat(value) || 0
+      const remainingAmount = totalAmount - changedAmount
+      const remainingParcels = installments.length - 1
+      const adjustedAmount = remainingParcels > 0 ? remainingAmount / remainingParcels : 0
+
+      for (let i = 0; i < installments.length; i++) {
+        if (i !== index) {
+          newInstallments[i].amount = adjustedAmount.toFixed(2)
+        }
+      }
+    }
+
+    setInstallments(newInstallments)
+  }
+
+  const handleEdit = (transaction: Transaction) => {
+    setEditingId(transaction.id)
+    setFormData({
+      category: transaction.category,
+      amount: transaction.amount.toString(),
+      description: transaction.description,
+      date: transaction.date,
+      parcelNumber: '1'
+    })
+    setIsParceled(false)
+    setInstallments([])
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Tem certeza que deseja excluir esta receita?')) return
+
+    try {
+      const { error } = await supabase
+        .from('transactions')
+        .delete()
+        .eq('id', id)
+
+      if (error) throw error
+
+      alert('Receita excluída com sucesso!')
+      loadTransactions(user.id)
+    } catch (error: any) {
+      alert('Erro ao excluir receita: ' + error.message)
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+
+    try {
+      const selectedDate = new Date(formData.date)
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      selectedDate.setHours(0, 0, 0, 0)
+      const isPastDate = selectedDate <= today
+
+      if (editingId) {
+        // Atualizar transação existente
+        const { error } = await supabase
+          .from('transactions')
+          .update({
+            category: formData.category,
+            amount: parseFloat(formData.amount),
+            description: formData.description,
+            date: formData.date
+          })
+          .eq('id', editingId)
+
+        if (error) throw error
+        alert('Receita atualizada com sucesso!')
+        setEditingId(null)
+      } else {
+        // Criar nova transação
+        if (isPastDate && !isParceled) {
+          // Data já passou e não é parcelado - salvar direto em transactions
+          const { error } = await supabase
+            .from('transactions')
+            .insert([
+              {
+                user_id: user.id,
+                type: 'income',
+                category: formData.category,
+                amount: parseFloat(formData.amount),
+                description: formData.description,
+                date: formData.date
+              }
+            ])
+
+          if (error) throw error
+        } else {
+          // Data futura ou parcelado - processar parcelas
+          const installmentsToSave = isParceled ? installments : [{
+            amount: formData.amount,
+            date: formData.date
+          }]
+
+          for (let i = 0; i < installmentsToSave.length; i++) {
+            const inst = installmentsToSave[i]
+            const instDate = new Date(inst.date)
+            instDate.setHours(0, 0, 0, 0)
+            
+            const todayCheck = new Date()
+            todayCheck.setHours(0, 0, 0, 0)
+
+            if (instDate <= todayCheck) {
+              // Parcela já venceu - salvar em transactions
+              const { error } = await supabase
+                .from('transactions')
+                .insert([
+                  {
+                    user_id: user.id,
+                    type: 'income',
+                    category: formData.category,
+                    amount: parseFloat(inst.amount),
+                    description: `${formData.description}${isParceled ? ` (${i + 1}/${installmentsToSave.length})` : ''}`,
+                    date: inst.date
+                  }
+                ])
+
+              if (error) throw error
+            } else {
+              // Parcela futura - salvar em future_transactions
+              const { error } = await supabase
+                .from('future_transactions')
+                .insert([
+                  {
+                    user_id: user.id,
+                    type: 'receivable',
+                    category: formData.category,
+                    amount: parseFloat(inst.amount),
+                    description: `${formData.description}${isParceled ? ` (${i + 1}/${installmentsToSave.length})` : ''}`,
+                    due_date: inst.date,
+                    status: 'pending'
+                  }
+                ])
+
+              if (error) throw error
+            }
+          }
+        }
+        alert('Receita adicionada com sucesso!')
+      }
+
+      // Resetar formulário
+      setFormData({
+        category: '',
+        amount: '',
+        description: '',
+        date: new Date().toISOString().split('T')[0],
+        parcelNumber: '1'
+      })
+      setIsParceled(false)
+      setInstallments([])
+      loadTransactions(user.id)
+      router.push('/dashboard')
+    } catch (error: any) {
+      alert('Erro ao processar receita: ' + error.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleLogout = async () => {
+    await authService.signOut()
+    router.push('/')
+  }
+
+  const categories = [
+    'Salário',
+    'Freelance',
+    'Investimentos',
+    'Vendas',
+    'Bônus',
+    'Outros'
+  ]
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => router.push("/dashboard")}
-              className="hover:bg-gray-100"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </Button>
-            <div>
-              <h1 className="text-2xl font-bold text-[#1C2A44]">
-                Registro de Receitas
-              </h1>
-              <p className="text-gray-600">Gerencie suas fontes de renda</p>
-            </div>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
+      {/* Menu Dropdown */}
+      {showMenu && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50" onClick={() => setShowMenu(false)}>
+          <div className="absolute top-20 right-6 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-4 w-72 animate-in slide-in-from-top-5" onClick={(e) => e.stopPropagation()}>
+            <nav className="space-y-2">
+              {[
+                { id: 'dashboard', label: 'Dashboard', icon: PieChart, href: '/dashboard' },
+                { id: 'receitas', label: 'Receitas', icon: TrendingUp, href: '/receitas' },
+                { id: 'despesas', label: 'Despesas', icon: TrendingDown, href: '/despesas' },
+                { id: 'gastos', label: 'Visualizar Gastos', icon: Wallet, href: '/gastos' },
+                { id: 'metas', label: 'Metas', icon: Target, href: '/metas' },
+                { id: 'comunidade', label: 'Comunidade', icon: Users, href: '/comunidade' },
+                { id: 'gamificacao', label: 'Conquistas', icon: Trophy, href: '/gamificacao' },
+              ].map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    router.push(item.href)
+                    setShowMenu(false)
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-[#4CAF84]/10 hover:text-[#4CAF84] transition-all duration-300"
+                >
+                  <item.icon className="w-5 h-5" />
+                  <span className="font-medium">{item.label}</span>
+                </button>
+              ))}
+              <div className="border-t border-gray-200 dark:border-gray-700 my-2"></div>
+              <button
+                onClick={() => router.push('/dashboard')}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-[#4CAF84]/10 hover:text-[#4CAF84] transition-all"
+              >
+                <Settings className="w-5 h-5" />
+                <span className="font-medium">Configurações</span>
+              </button>
+              <button
+                onClick={handleLogout}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+              >
+                <LogOut className="w-5 h-5" />
+                <span className="font-medium">Sair</span>
+              </button>
+            </nav>
           </div>
-          <Button
-            onClick={() => setShowForm(!showForm)}
-            className="bg-gradient-to-r from-[#4CAF84] to-[#3d8a6a] hover:from-[#3d8a6a] hover:to-[#4CAF84] text-white rounded-xl shadow-lg"
-          >
-            <Plus className="w-5 h-5 mr-2" />
-            Nova Receita
-          </Button>
+        </div>
+      )}
+
+      {/* Top Bar */}
+      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 sticky top-0 z-10 transition-colors duration-300">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-[#1C2A44] dark:text-white">
+              {editingId ? 'Editar Receita' : 'Adicionar Receita'}
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400">
+              Registre suas entradas financeiras
+            </p>
+          </div>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={toggleTheme}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-all"
+            >
+              {theme === 'dark' ? (
+                <Sun className="w-6 h-6 text-gray-600 dark:text-gray-400" />
+              ) : (
+                <Moon className="w-6 h-6 text-gray-600" />
+              )}
+            </button>
+            <button className="relative p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-all">
+              <Bell className="w-6 h-6 text-gray-600 dark:text-gray-400" />
+              <span className="absolute top-1 right-1 w-2 h-2 bg-[#4CAF84] rounded-full"></span>
+            </button>
+            <button onClick={() => setShowMenu(!showMenu)}>
+              <Avatar className="w-10 h-10 bg-gradient-to-br from-[#4CAF84] to-[#3d8a6a] cursor-pointer hover:scale-105 transition-transform">
+                <AvatarFallback className="text-white font-semibold bg-[#1C2A44] dark:bg-[#4CAF84]">
+                  {user?.name?.substring(0, 2).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+            </button>
+          </div>
         </div>
       </header>
 
-      <div className="p-6 space-y-6">
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card className="bg-gradient-to-br from-[#4CAF84] to-[#3d8a6a] text-white border-0 shadow-lg">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium opacity-90">
-                Total de Receitas
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-3xl font-bold">R$ 10.150,00</p>
-              <p className="text-sm opacity-80 mt-1">Este mês</p>
-            </CardContent>
-          </Card>
+      <div className="container mx-auto px-4 py-8 max-w-2xl">
+        <Card className="border-0 shadow-xl dark:bg-gray-800">
+          <CardHeader className="bg-gradient-to-r from-[#4CAF84] to-[#3d8a6a] text-white rounded-t-xl">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                <TrendingUp className="w-6 h-6" />
+              </div>
+              <div>
+                <CardTitle className="text-2xl font-bold">
+                  {editingId ? 'Editar Receita' : 'Adicionar Receita'}
+                </CardTitle>
+                <p className="text-sm opacity-90 mt-1">Registre suas entradas financeiras</p>
+              </div>
+            </div>
+          </CardHeader>
 
-          <Card className="bg-white border border-gray-200 shadow-md">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-gray-600">
-                Receitas Recorrentes
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-3xl font-bold text-[#1C2A44]">R$ 8.950,00</p>
-              <p className="text-sm text-gray-500 mt-1">Mensais</p>
-            </CardContent>
-          </Card>
+          <CardContent className="p-6">
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="category" className="text-[#1C2A44] dark:text-white font-semibold flex items-center gap-2">
+                  <Tag className="w-4 h-4 text-[#4CAF84]" />
+                  Categoria
+                </Label>
+                <select
+                  id="category"
+                  required
+                  value={formData.category}
+                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                  className="w-full px-4 py-3 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-[#1C2A44] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#4CAF84] focus:border-transparent transition-all"
+                >
+                  <option value="">Selecione uma categoria</option>
+                  {categories.map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
 
-          <Card className="bg-white border border-gray-200 shadow-md">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-gray-600">
-                Receitas Extras
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-3xl font-bold text-[#1C2A44]">R$ 1.200,00</p>
-              <p className="text-sm text-gray-500 mt-1">Este mês</p>
-            </CardContent>
-          </Card>
-        </div>
+              <div className="space-y-2">
+                <Label htmlFor="amount" className="text-[#1C2A44] dark:text-white font-semibold flex items-center gap-2">
+                  <DollarSign className="w-4 h-4 text-[#4CAF84]" />
+                  Valor Total
+                </Label>
+                <Input
+                  id="amount"
+                  type="number"
+                  step="0.01"
+                  required
+                  value={formData.amount}
+                  onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                  placeholder="0,00"
+                  className="text-lg h-12 border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:ring-[#4CAF84] focus:border-[#4CAF84]"
+                />
+              </div>
 
-        {/* Form */}
-        {showForm && (
-          <Card className="border-0 shadow-xl">
-            <CardHeader>
-              <CardTitle className="text-xl font-bold text-[#1C2A44]">
-                Adicionar Nova Receita
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <form className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="descricao" className="text-[#1C2A44] font-medium">
-                      Descrição
-                    </Label>
-                    <Input
-                      id="descricao"
-                      placeholder="Ex: Salário, Freelance..."
-                      className="h-12 rounded-xl border-gray-300 focus:border-[#4CAF84] focus:ring-[#4CAF84]"
+              <div className="space-y-2">
+                <Label htmlFor="description" className="text-[#1C2A44] dark:text-white font-semibold">
+                  Descrição
+                </Label>
+                <Input
+                  id="description"
+                  type="text"
+                  required
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  placeholder="Ex: Comissão de vendas"
+                  className="h-12 border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:ring-[#4CAF84] focus:border-[#4CAF84]"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="date" className="text-[#1C2A44] dark:text-white font-semibold flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-[#4CAF84]" />
+                  Data da primeira parcela
+                </Label>
+                <Input
+                  id="date"
+                  type="date"
+                  required
+                  value={formData.date}
+                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                  className="h-12 border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:ring-[#4CAF84] focus:border-[#4CAF84]"
+                />
+              </div>
+
+              {/* Parcelamento - apenas para novas receitas */}
+              {!editingId && (
+                <div className="space-y-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    <Label className="text-[#1C2A44] dark:text-white font-semibold">Parcelamento</Label>
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <input
+                      type="checkbox"
+                      id="isParceled"
+                      checked={isParceled}
+                      onChange={(e) => setIsParceled(e.target.checked)}
+                      className="w-4 h-4 text-[#4CAF84] focus:ring-[#4CAF84]"
                     />
+                    <Label htmlFor="isParceled" className="text-[#1C2A44] dark:text-white">
+                      Receber parcelado
+                    </Label>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="valor" className="text-[#1C2A44] font-medium">
-                      Valor
-                    </Label>
-                    <div className="relative">
-                      <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                      <Input
-                        id="valor"
-                        type="number"
-                        placeholder="0,00"
-                        className="h-12 pl-10 rounded-xl border-gray-300 focus:border-[#4CAF84] focus:ring-[#4CAF84]"
-                      />
+                  {isParceled && (
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="parcelNumber" className="text-sm text-[#1C2A44] dark:text-white">
+                          Número de parcelas
+                        </Label>
+                        <Input
+                          id="parcelNumber"
+                          type="number"
+                          min="1"
+                          required
+                          value={formData.parcelNumber}
+                          onChange={(e) => setFormData({ ...formData, parcelNumber: e.target.value })}
+                          placeholder="3"
+                          className="h-10 border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:ring-[#4CAF84] focus:border-[#4CAF84]"
+                        />
+                      </div>
+
+                      {installments.map((inst, index) => (
+                        <div key={index} className="grid grid-cols-2 gap-4 p-3 bg-white dark:bg-gray-700 rounded-lg">
+                          <div className="space-y-2">
+                            <Label className="text-xs text-[#1C2A44] dark:text-white">
+                              Parcela {index + 1} - Valor
+                            </Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={inst.amount}
+                              onChange={(e) => handleInstallmentChange(index, 'amount', e.target.value)}
+                              className="h-8 border-gray-200 dark:border-gray-600 dark:bg-gray-600 dark:text-white focus:ring-[#4CAF84] focus:border-[#4CAF84]"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-xs text-[#1C2A44] dark:text-white">
+                              Data
+                            </Label>
+                            <Input
+                              type="date"
+                              value={inst.date}
+                              onChange={(e) => handleInstallmentChange(index, 'date', e.target.value)}
+                              className="h-8 border-gray-200 dark:border-gray-600 dark:bg-gray-600 dark:text-white focus:ring-[#4CAF84] focus:border-[#4CAF84]"
+                            />
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="categoria" className="text-[#1C2A44] font-medium">
-                      Categoria
-                    </Label>
-                    <Select>
-                      <SelectTrigger className="h-12 rounded-xl border-gray-300">
-                        <SelectValue placeholder="Selecione uma categoria" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="salario">Salário</SelectItem>
-                        <SelectItem value="freelance">Freelance</SelectItem>
-                        <SelectItem value="investimentos">Investimentos</SelectItem>
-                        <SelectItem value="bonus">Bônus</SelectItem>
-                        <SelectItem value="outros">Outros</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="data" className="text-[#1C2A44] font-medium">
-                      Data
-                    </Label>
-                    <div className="relative">
-                      <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                      <Input
-                        id="data"
-                        type="date"
-                        className="h-12 pl-10 rounded-xl border-gray-300 focus:border-[#4CAF84] focus:ring-[#4CAF84]"
-                      />
-                    </div>
-                  </div>
+                  )}
                 </div>
+              )}
 
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="recorrente"
-                    className="w-5 h-5 rounded border-gray-300 text-[#4CAF84] focus:ring-[#4CAF84]"
-                  />
-                  <Label htmlFor="recorrente" className="text-[#1C2A44] font-medium cursor-pointer">
-                    Receita recorrente (mensal)
-                  </Label>
-                </div>
-
-                <div className="flex gap-3 pt-4">
+              <div className="flex gap-3">
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 h-12 bg-gradient-to-r from-[#4CAF84] to-[#3d8a6a] hover:from-[#3d8a6a] hover:to-[#4CAF84] text-white rounded-xl font-semibold text-lg shadow-lg hover:shadow-xl transition-all duration-300 disabled:opacity-50"
+                >
+                  {loading ? 'Salvando...' : (
+                    <>
+                      <Plus className="w-5 h-5 mr-2" />
+                      {editingId ? 'Atualizar Receita' : 'Adicionar Receita'}
+                    </>
+                  )}
+                </Button>
+                {editingId && (
                   <Button
                     type="button"
-                    variant="outline"
-                    onClick={() => setShowForm(false)}
-                    className="flex-1 h-12 rounded-xl border-2"
+                    onClick={() => {
+                      setEditingId(null)
+                      setFormData({
+                        category: '',
+                        amount: '',
+                        description: '',
+                        date: new Date().toISOString().split('T')[0],
+                        parcelNumber: '1'
+                      })
+                      setInstallments([])
+                    }}
+                    className="h-12 px-6 bg-gray-500 hover:bg-gray-600 text-white rounded-xl font-semibold"
                   >
                     Cancelar
                   </Button>
-                  <Button
-                    type="submit"
-                    className="flex-1 h-12 bg-gradient-to-r from-[#4CAF84] to-[#3d8a6a] hover:from-[#3d8a6a] hover:to-[#4CAF84] text-white rounded-xl shadow-lg"
+                )}
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+
+        {/* Lista de Receitas */}
+        {transactions.length > 0 && (
+          <Card className="mt-6 border-0 shadow-xl dark:bg-gray-800">
+            <CardHeader className="bg-gradient-to-r from-gray-700 to-gray-800 text-white rounded-t-xl">
+              <CardTitle className="text-xl font-bold">Receitas Registradas</CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="space-y-3">
+                {transactions.map((transaction) => (
+                  <div
+                    key={transaction.id}
+                    className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-xl hover:shadow-md transition-all"
                   >
-                    Adicionar Receita
-                  </Button>
-                </div>
-              </form>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-[#1C2A44] dark:text-white">
+                          {transaction.description}
+                        </span>
+                        <span className="text-xs px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full">
+                          {transaction.category}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-4 mt-1 text-sm text-gray-600 dark:text-gray-400">
+                        <span className="font-bold text-green-600 dark:text-green-400">
+                          R$ {transaction.amount.toFixed(2)}
+                        </span>
+                        <span>{new Date(transaction.date).toLocaleDateString('pt-BR')}</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleEdit(transaction)}
+                        className="p-2 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-all"
+                        title="Editar"
+                      >
+                        <Edit2 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(transaction.id)}
+                        className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-all"
+                        title="Excluir"
+                      >
+                        <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
         )}
 
-        {/* List */}
-        <Card className="border-0 shadow-lg">
-          <CardHeader>
-            <CardTitle className="text-xl font-bold text-[#1C2A44]">
-              Histórico de Receitas
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {receitas.map((receita) => (
-              <div
-                key={receita.id}
-                className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-all cursor-pointer"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-[#4CAF84]/20 rounded-xl flex items-center justify-center">
-                    <TrendingUp className="w-6 h-6 text-[#4CAF84]" />
-                  </div>
-                  <div>
-                    <p className="font-semibold text-[#1C2A44]">
-                      {receita.descricao}
-                    </p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <p className="text-sm text-gray-500">{receita.categoria}</p>
-                      {receita.recorrente && (
-                        <span className="px-2 py-0.5 bg-[#4CAF84]/20 text-[#4CAF84] text-xs rounded-full font-medium">
-                          Recorrente
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-lg text-[#4CAF84]">
-                    +R$ {receita.valor.toLocaleString("pt-BR")}
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    {new Date(receita.data).toLocaleDateString("pt-BR")}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+        <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl">
+          <p className="text-sm text-blue-800 dark:text-blue-300">
+            💡 <strong>Dica:</strong> Registre todas as suas receitas para ter uma visão completa da sua saúde financeira!
+          </p>
+        </div>
       </div>
     </div>
-  );
+  )
 }
