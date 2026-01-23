@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Wallet, TrendingUp, Shield, Users, ArrowRight, Eye, EyeOff, Mail } from 'lucide-react'
-import { authService } from '@/lib/auth'
+import { authService, checkSubscription } from '@/lib/auth'
 
 export default function Home() {
   const router = useRouter()
@@ -21,14 +21,6 @@ export default function Home() {
     password: ''
   })
 
-  useEffect(() => {
-    // Verificar se usuário já está logado
-    const currentUser = authService.getCurrentUser()
-    if (currentUser) {
-      router.push('/dashboard')
-    }
-  }, [router])
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
@@ -36,20 +28,27 @@ export default function Home() {
 
     try {
       if (isLogin) {
+        // LOGIN
         const { user, error } = await authService.signIn(formData.email, formData.password)
         if (error) {
           setError(error)
         } else if (user) {
-          // Redireciona diretamente para o dashboard
-          router.push('/dashboard')
+          // Verificar se tem assinatura ativa
+          const hasSubscription = await checkSubscription(user.id)
+          if (hasSubscription) {
+            router.push('/dashboard')
+          } else {
+            router.push('/quiz')
+          }
         }
       } else {
+        // CADASTRO
         const { user, error } = await authService.signUp(formData.email, formData.password, formData.name)
         if (error) {
           setError(error)
         } else if (user) {
-          // Redireciona diretamente para o dashboard
-          router.push('/dashboard')
+          // Redireciona para página de planos após cadastro
+          router.push('/plans')
         }
       }
     } catch (err: any) {

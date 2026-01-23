@@ -6,6 +6,59 @@ export interface User {
   name: string
 }
 
+// Função helper para gerenciar cookies
+const setCookie = (name: string, value: string, days: number = 7) => {
+  if (typeof window === 'undefined') return
+  
+  const expires = new Date()
+  expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000)
+  document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=/`
+}
+
+const deleteCookie = (name: string) => {
+  if (typeof window === 'undefined') return
+  
+  document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/`
+}
+
+// Verificar se usuário tem assinatura ativa
+export const checkSubscription = async (userId: string): Promise<boolean> => {
+  try {
+    const { data, error } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (error) {
+      console.error('Erro ao verificar assinatura:', error)
+      return false
+    }
+
+    if (!data) {
+      return false
+    }
+
+    // Verificar se está expirada
+    if (data.expires_at) {
+      const expiresAt = new Date(data.expires_at)
+      const now = new Date()
+      
+      if (now > expiresAt) {
+        return false
+      }
+    }
+
+    return true
+  } catch (error) {
+    console.error('Erro ao verificar assinatura:', error)
+    return false
+  }
+}
+
 // Simular autenticação local (sem Supabase Auth)
 export const authService = {
   async signUp(email: string, password: string, name: string): Promise<{ user: User | null; error: string | null }> {
@@ -44,9 +97,10 @@ export const authService = {
         }
       }
 
-      // Salvar no localStorage
+      // Salvar no localStorage e cookie
       if (typeof window !== 'undefined') {
         localStorage.setItem('finwise_user', JSON.stringify(data))
+        setCookie('finwise_user', JSON.stringify(data))
       }
 
       return { user: data, error: null }
@@ -80,9 +134,10 @@ export const authService = {
         return { user: null, error: 'Email ou senha incorretos' }
       }
 
-      // Salvar no localStorage
+      // Salvar no localStorage e cookie
       if (typeof window !== 'undefined') {
         localStorage.setItem('finwise_user', JSON.stringify(data))
+        setCookie('finwise_user', JSON.stringify(data))
       }
 
       return { user: data, error: null }
@@ -138,6 +193,7 @@ export const authService = {
   async signOut(): Promise<void> {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('finwise_user')
+      deleteCookie('finwise_user')
     }
   },
 

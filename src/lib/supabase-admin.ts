@@ -30,9 +30,11 @@ export interface Subscription {
   id: string
   user_id: string
   subscription_id: string
+  reference_id: string
   plan_id: 'monthly' | 'semiannual' | 'annual'
-  status: 'pending' | 'active' | 'paused' | 'cancelled'
+  status: 'pending' | 'active' | 'paused' | 'cancelled' | 'expired'
   amount: number
+  expires_at?: string
   created_at: string
   activated_at?: string
   cancelled_at?: string
@@ -45,6 +47,7 @@ export const subscriptionService = {
   async create(data: {
     userId: string
     subscriptionId: string
+    referenceId: string
     planId: string
     amount: number
   }) {
@@ -54,6 +57,7 @@ export const subscriptionService = {
       .insert({
         user_id: data.userId,
         subscription_id: data.subscriptionId,
+        reference_id: data.referenceId,
         plan_id: data.planId,
         amount: data.amount,
         status: 'pending'
@@ -65,16 +69,20 @@ export const subscriptionService = {
     return subscription
   },
 
-  // Atualizar status da assinatura
+  // Atualizar status da assinatura (com data de expiração)
   async updateStatus(
-    subscriptionId: string,
-    status: 'pending' | 'active' | 'paused' | 'cancelled'
+    userId: string,
+    status: 'pending' | 'active' | 'paused' | 'cancelled' | 'expired',
+    expiresAt?: string
   ) {
     const supabaseAdmin = getSupabaseAdmin()
     const updateData: any = { status, updated_at: new Date().toISOString() }
 
     if (status === 'active') {
       updateData.activated_at = new Date().toISOString()
+      if (expiresAt) {
+        updateData.expires_at = expiresAt
+      }
     } else if (status === 'cancelled') {
       updateData.cancelled_at = new Date().toISOString()
     }
@@ -82,7 +90,7 @@ export const subscriptionService = {
     const { data, error } = await supabaseAdmin
       .from('subscriptions')
       .update(updateData)
-      .eq('subscription_id', subscriptionId)
+      .eq('user_id', userId)
       .select()
       .single()
 
@@ -90,7 +98,20 @@ export const subscriptionService = {
     return data
   },
 
-  // Buscar assinatura por ID do Mercado Pago
+  // Buscar assinatura por reference_id
+  async findByReferenceId(referenceId: string) {
+    const supabaseAdmin = getSupabaseAdmin()
+    const { data, error } = await supabaseAdmin
+      .from('subscriptions')
+      .select('*')
+      .eq('reference_id', referenceId)
+      .single()
+
+    if (error && error.code !== 'PGRST116') throw error
+    return data as Subscription | null
+  },
+
+  // Buscar assinatura por ID do PagBank
   async getBySubscriptionId(subscriptionId: string) {
     const supabaseAdmin = getSupabaseAdmin()
     const { data, error } = await supabaseAdmin
@@ -99,8 +120,8 @@ export const subscriptionService = {
       .eq('subscription_id', subscriptionId)
       .single()
 
-    if (error) throw error
-    return data as Subscription
+    if (error && error.code !== 'PGRST116') throw error
+    return data as Subscription | null
   },
 
   // Buscar assinatura ativa do usuário
@@ -122,6 +143,19 @@ export const subscriptionService = {
   // Verificar se usuário tem assinatura ativa
   async hasActiveSubscription(userId: string): Promise<boolean> {
     const subscription = await this.getActiveByUserId(userId)
+    
+    // Verificar se a assinatura está expirada
+    if (subscription && subscription.expires_at) {
+      const expiresAt = new Date(subscription.expires_at)
+      const now = new Date()
+      
+      if (now > expiresAt) {
+        // Marcar como expirada
+        await this.updateStatus(userId, 'expired')
+        return false
+      }
+    }
+    
     return subscription !== null
   }
 }

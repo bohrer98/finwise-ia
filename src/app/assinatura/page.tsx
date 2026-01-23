@@ -1,48 +1,37 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, Sparkles, TrendingUp, Shield, ArrowRight, Loader2 } from 'lucide-react'
-import { SUBSCRIPTION_PLANS } from '@/lib/mercadopago'
+import { Check, Sparkles, TrendingUp, Shield, ArrowRight } from 'lucide-react'
+import { SUBSCRIPTION_PLANS } from '@/lib/pagbank'
+import { authService } from '@/lib/auth'
 
 export default function AssinaturaPage() {
   const router = useRouter()
-  const [loading, setLoading] = useState<string | null>(null)
-  const [error, setError] = useState('')
+  const [user, setUser] = useState<any>(null)
 
-  // Simular dados do usuário (em produção, buscar do contexto/sessão)
-  const userEmail = 'usuario@exemplo.com'
-  const userId = 'user-123'
-
-  const handleSubscribe = async (planId: string) => {
-    setLoading(planId)
-    setError('')
-
-    try {
-      const response = await fetch('/api/subscription/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          planId,
-          userEmail,
-          userId,
-        }),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Erro ao criar assinatura')
-      }
-
-      // Redirecionar para checkout do Mercado Pago
-      if (data.initPoint) {
-        window.location.href = data.initPoint
-      }
-    } catch (err: any) {
-      setError(err.message || 'Erro ao processar assinatura')
-      setLoading(null)
+  useEffect(() => {
+    // Buscar dados reais do usuário
+    const currentUser = authService.getCurrentUser()
+    if (!currentUser) {
+      router.push('/')
+      return
     }
+    setUser(currentUser)
+  }, [router])
+
+  const handleSubscribe = () => {
+    // Redirecionar diretamente para o link de pagamento do PagBank
+    window.location.href = 'https://pag.ae/81ovHmF7R'
+  }
+
+  // Loading state enquanto busca usuário
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-[#1C2A44] via-[#243552] to-[#1C2A44] flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#4CAF84]"></div>
+      </div>
+    )
   }
 
   return (
@@ -74,12 +63,6 @@ export default function AssinaturaPage() {
             Escolha o plano que melhor se adapta às suas necessidades e comece a controlar suas finanças com inteligência
           </p>
         </div>
-
-        {error && (
-          <div className="max-w-4xl mx-auto mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
-            <p className="text-red-400 text-center">{error}</p>
-          </div>
-        )}
 
         {/* Pricing Cards */}
         <div className="grid md:grid-cols-3 gap-8 max-w-7xl mx-auto">
@@ -113,21 +96,11 @@ export default function AssinaturaPage() {
             </ul>
 
             <button
-              onClick={() => handleSubscribe('monthly')}
-              disabled={loading === 'monthly'}
-              className="w-full bg-white/10 hover:bg-white/20 text-white py-3 rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleSubscribe}
+              className="w-full bg-white/10 hover:bg-white/20 text-white py-3 rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-2"
             >
-              {loading === 'monthly' ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Processando...
-                </>
-              ) : (
-                <>
-                  Assinar agora
-                  <ArrowRight className="w-5 h-5" />
-                </>
-              )}
+              Assinar agora
+              <ArrowRight className="w-5 h-5" />
             </button>
           </div>
 
@@ -173,21 +146,11 @@ export default function AssinaturaPage() {
             </ul>
 
             <button
-              onClick={() => handleSubscribe('semiannual')}
-              disabled={loading === 'semiannual'}
-              className="w-full bg-gradient-to-r from-[#4CAF84] to-[#3d8a6a] text-white py-3 rounded-xl font-semibold hover:shadow-lg hover:shadow-[#4CAF84]/30 transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleSubscribe}
+              className="w-full bg-gradient-to-r from-[#4CAF84] to-[#3d8a6a] text-white py-3 rounded-xl font-semibold hover:shadow-lg hover:shadow-[#4CAF84]/30 transition-all duration-300 flex items-center justify-center gap-2"
             >
-              {loading === 'semiannual' ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Processando...
-                </>
-              ) : (
-                <>
-                  Assinar agora
-                  <ArrowRight className="w-5 h-5" />
-                </>
-              )}
+              Assinar agora
+              <ArrowRight className="w-5 h-5" />
             </button>
           </div>
 
@@ -229,21 +192,11 @@ export default function AssinaturaPage() {
             </ul>
 
             <button
-              onClick={() => handleSubscribe('annual')}
-              disabled={loading === 'annual'}
-              className="w-full bg-white/10 hover:bg-white/20 text-white py-3 rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleSubscribe}
+              className="w-full bg-white/10 hover:bg-white/20 text-white py-3 rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-2"
             >
-              {loading === 'annual' ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Processando...
-                </>
-              ) : (
-                <>
-                  Assinar agora
-                  <ArrowRight className="w-5 h-5" />
-                </>
-              )}
+              Assinar agora
+              <ArrowRight className="w-5 h-5" />
             </button>
           </div>
         </div>
@@ -256,7 +209,7 @@ export default function AssinaturaPage() {
             </div>
             <h3 className="text-xl font-semibold text-white mb-2">100% Seguro</h3>
             <p className="text-gray-400 text-sm">
-              Pagamentos processados com segurança pelo Mercado Pago
+              Pagamentos processados com segurança pelo PagBank
             </p>
           </div>
 
